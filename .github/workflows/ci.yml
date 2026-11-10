@@ -1,0 +1,40 @@
+name: build and test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: orderdesk
+          POSTGRES_PASSWORD: orderdesk
+          POSTGRES_DB: orderdesk
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orderdesk -d orderdesk"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Free Pascal and the PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            fp-compiler fp-units-rtl fp-units-base fp-units-fcl fp-units-db \
+            libpq-dev postgresql-client make
+
+      - name: Compile
+        run: make
+
+      - name: Run all tests
+        run: make test

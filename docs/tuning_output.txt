@@ -1,0 +1,140 @@
+
+============================================================
+CASE 1 Customer order history, newest 20
+============================================================
+
+--- BEFORE: no index on customer_id -----------------------
+                                                 QUERY PLAN                                                  
+-------------------------------------------------------------------------------------------------------------
+ Limit  (cost=8698.62..8700.26 rows=14 width=30) (actual rows=13 loops=1)
+   Buffers: shared hit=6210
+   ->  Gather Merge  (cost=8698.62..8700.26 rows=14 width=30) (actual rows=13 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=6210
+         ->  Sort  (cost=7698.60..7698.62 rows=7 width=30) (actual rows=4 loops=3)
+               Sort Key: placed_at DESC
+               Sort Method: quicksort  Memory: 25kB
+               Buffers: shared hit=6210
+               Worker 0:  Sort Method: quicksort  Memory: 25kB
+               Worker 1:  Sort Method: quicksort  Memory: 25kB
+               ->  Parallel Seq Scan on orders  (cost=0.00..7698.50 rows=7 width=30) (actual rows=4 loops=3)
+                     Filter: (customer_id = 5006)
+                     Rows Removed by Filter: 99996
+                     Buffers: shared hit=6136
+ Planning:
+   Buffers: shared hit=83
+ Planning Time: 0.147 ms
+ Execution Time: 16.603 ms
+(20 rows)
+
+
+--- AFTER: index on (customer_id, placed_at DESC) ---------
+                                                          QUERY PLAN                                                           
+-------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=66.62..66.66 rows=16 width=30) (actual rows=13 loops=1)
+   Buffers: shared hit=15
+   ->  Sort  (cost=66.62..66.66 rows=16 width=30) (actual rows=13 loops=1)
+         Sort Key: placed_at DESC
+         Sort Method: quicksort  Memory: 25kB
+         Buffers: shared hit=15
+         ->  Bitmap Heap Scan on orders  (cost=4.55..66.30 rows=16 width=30) (actual rows=13 loops=1)
+               Recheck Cond: (customer_id = 5006)
+               Heap Blocks: exact=12
+               Buffers: shared hit=15
+               ->  Bitmap Index Scan on orders_customer_placed_idx  (cost=0.00..4.54 rows=16 width=0) (actual rows=13 loops=1)
+                     Index Cond: (customer_id = 5006)
+                     Buffers: shared hit=3
+ Planning:
+   Buffers: shared hit=19
+ Planning Time: 0.142 ms
+ Execution Time: 0.053 ms
+(17 rows)
+
+
+============================================================
+CASE 2 Work queue: orders waiting for payment, oldest first
+============================================================
+
+--- BEFORE: no partial index -------------------------------
+                                                      QUERY PLAN                                                      
+----------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.42..2272.02 rows=25 width=22) (actual rows=25 loops=1)
+   Buffers: shared hit=301223
+   ->  Index Scan using orders_placed_idx on orders  (cost=0.42..38163.25 rows=420 width=22) (actual rows=25 loops=1)
+         Filter: (status = 'PLACED'::text)
+         Rows Removed by Filter: 299217
+         Buffers: shared hit=301223
+ Planning:
+   Buffers: shared hit=9
+ Planning Time: 0.064 ms
+ Execution Time: 148.309 ms
+(10 rows)
+
+
+--- AFTER: partial index WHERE status = PLACED -----------
+                                                       QUERY PLAN                                                        
+-------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=0.27..98.96 rows=25 width=22) (actual rows=25 loops=1)
+   Buffers: shared hit=27
+   ->  Index Scan using orders_open_queue_idx on orders  (cost=0.27..1658.29 rows=420 width=22) (actual rows=25 loops=1)
+         Buffers: shared hit=27
+ Planning:
+   Buffers: shared hit=16
+ Planning Time: 0.196 ms
+ Execution Time: 0.031 ms
+(8 rows)
+
+
+--- Size of the partial index next to a full one ----------
+      index_name       | size  
+-----------------------+-------
+ orders_open_queue_idx | 48 kB
+ orders_placed_idx     | 16 MB
+(2 rows)
+
+
+============================================================
+CASE 3 Same index, two ways of writing the question
+============================================================
+
+--- BEFORE: the column is wrapped in a cast ---------------
+                                                   QUERY PLAN                                                   
+----------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=9639.36..9639.37 rows=1 width=40) (actual rows=1 loops=1)
+   Buffers: shared hit=6136
+   ->  Gather  (cost=9639.13..9639.34 rows=2 width=40) (actual rows=3 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=6136
+         ->  Partial Aggregate  (cost=8639.13..8639.14 rows=1 width=40) (actual rows=1 loops=3)
+               Buffers: shared hit=6136
+               ->  Parallel Seq Scan on orders  (cost=0.00..8636.00 rows=625 width=6) (actual rows=134 loops=3)
+                     Filter: ((placed_at)::date = (CURRENT_DATE - 200))
+                     Rows Removed by Filter: 99866
+                     Buffers: shared hit=6136
+ Planning:
+   Buffers: shared hit=29 read=4
+ Planning Time: 0.134 ms
+ Execution Time: 25.586 ms
+(16 rows)
+
+
+--- AFTER: the column is left bare, compared to a range ---
+                                                    QUERY PLAN                                                     
+-------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=1313.99..1314.00 rows=1 width=40) (actual rows=1 loops=1)
+   Buffers: shared hit=382
+   ->  Bitmap Heap Scan on orders  (cost=16.63..1311.94 rows=410 width=6) (actual rows=402 loops=1)
+         Recheck Cond: ((placed_at >= (CURRENT_DATE - 200)) AND (placed_at < (CURRENT_DATE - 199)))
+         Heap Blocks: exact=373
+         Buffers: shared hit=382
+         ->  Bitmap Index Scan on orders_placed_idx  (cost=0.00..16.53 rows=410 width=0) (actual rows=402 loops=1)
+               Index Cond: ((placed_at >= (CURRENT_DATE - 200)) AND (placed_at < (CURRENT_DATE - 199)))
+               Buffers: shared hit=9
+ Planning:
+   Buffers: shared hit=6
+ Planning Time: 0.105 ms
+ Execution Time: 0.426 ms
+(13 rows)
+

@@ -1,0 +1,12 @@
+Customer: Ada Obi, Manchester
+Total to pay     : 34.80
+Order 1 placed.
+Customer created.
+** Please enter a whole number
+only 1 in stock
+** Not enough stock: KIT-003 (wanted 5, have 1)
+Order 1 is now PAID.
+Order 1 cancelled and stock returned.
+** Not enough stock: KIT-002 has 200, cannot remove 9999
+All 13 products balance.
+Signed off.

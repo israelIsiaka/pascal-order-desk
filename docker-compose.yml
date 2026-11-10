@@ -1,0 +1,41 @@
+# Two containers: PostgreSQL, and the compiled order desk.
+#
+#   docker compose up -d db          start the database
+#   docker compose run --rm app      open an order desk session
+#   docker compose run --rm app make test
+#   docker compose down -v           stop and delete the data
+#
+# Run "docker compose run --rm app" in several terminals at once to
+# see parallel sessions (menu option 11 lists them).
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: orderdesk
+      POSTGRES_PASSWORD: orderdesk
+      POSTGRES_DB: orderdesk
+    volumes:
+      # Scripts in this directory run once, in name order, when the
+      # database is first created: 01_schema, 02_procedures, 03_seed.
+      - ./db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orderdesk -d orderdesk"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ORDERDESK_DB: "host=db port=5432 dbname=orderdesk user=orderdesk password=orderdesk"
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: orderdesk
+      PGUSER: orderdesk
+      PGPASSWORD: orderdesk
+    stdin_open: true
+    tty: true
